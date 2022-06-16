@@ -6,8 +6,8 @@
 // to IOCTL_HID_GET_DEVICE_ATTRIBUTES.
 //
 
-#define RT5682_PID              0xBACC
-#define RT5682_VID              0x00FF
+#define RT5682_PID              0x10EC
+#define RT5682_VID              0x5682
 #define RT5682_VERSION          0x0001
 
 //
@@ -15,6 +15,7 @@
 //
 
 #define REPORTID_MEDIA	0x01
+#define REPORTID_SPECKEYS		0x02
 
 #pragma pack(1)
 typedef struct _RT5682_MEDIA_REPORT
@@ -27,12 +28,20 @@ typedef struct _RT5682_MEDIA_REPORT
 } Rt5682MediaReport;
 #pragma pack()
 
-//
-// Feature report infomation
-//
+#define CONTROL_CODE_JACK_TYPE 0x1
 
-#define DEVICE_MODE_MOUSE        0x00
-#define DEVICE_MODE_SINGLE_INPUT 0x01
-#define DEVICE_MODE_MULTI_INPUT  0x02
+#pragma pack(1)
+typedef struct _CSAUDIO_SPECKEY_REPORT
+{
+
+	BYTE      ReportID;
+
+	BYTE	  ControlCode;
+
+	BYTE	  ControlValue;
+
+} CsAudioSpecialKeyReport;
+
+#pragma pack()
 
 #endif

@@ -752,6 +752,14 @@ void rt5682_jackdetect(PRTEK_CONTEXT pDevice) {
 		/* jack out */
 		pDevice->JackType = rt5682_headset_detect(pDevice, 0);
 	}
+
+	CsAudioSpecialKeyReport report;
+	report.ReportID = REPORTID_SPECKEYS;
+	report.ControlCode = CONTROL_CODE_JACK_TYPE;
+	report.ControlValue = pDevice->JackType;
+
+	size_t bytesWritten;
+	Rt5682ProcessVendorReport(pDevice, &report, sizeof(report), &bytesWritten);
 }
 
 VOID
