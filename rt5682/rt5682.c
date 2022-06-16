@@ -214,8 +214,6 @@ NTSTATUS BOOTCODEC(
 			return status;
 		}
 
-		DbgPrint("Starting HP Calibration\n");
-
 		int count;
 		for (count = 0; count < 60; count++) {
 			UINT16 value;
@@ -230,8 +228,6 @@ NTSTATUS BOOTCODEC(
 		if (count >= 60) {
 			DbgPrint("HP Calibration Failure\n");
 		}
-
-		DbgPrint("HP Calibrate done!\n");
 	}
 
 	struct reg restoreSettingsAndPatch[] = {
@@ -349,8 +345,6 @@ NTSTATUS BOOTCODEC(
 	if (!NT_SUCCESS(status)) {
 		return status;
 	}
-
-	DbgPrint("Burst write done!\n");
 	return STATUS_SUCCESS;
 }
 
@@ -785,8 +779,6 @@ BOOLEAN OnInterruptIsr(
 		return true;
 
 	NTSTATUS status = STATUS_SUCCESS;
-
-	DbgPrint("Got Interrupt!\n");
 
 	WDF_OBJECT_ATTRIBUTES attributes;
 	WDF_WORKITEM_CONFIG workitemConfig;
