@@ -6,8 +6,8 @@
 // to IOCTL_HID_GET_DEVICE_ATTRIBUTES.
 //
 
-#define RT5682_PID              0x10EC
-#define RT5682_VID              0x5682
+#define RT5682_PID              0x5682
+#define RT5682_VID              0x10EC
 #define RT5682_VERSION          0x0001
 
 //
