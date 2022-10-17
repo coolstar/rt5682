@@ -149,6 +149,41 @@ static NTSTATUS rt5682_reg_burstWrite(PRTEK_CONTEXT pDevice, struct reg* regs, i
 	return status;
 }
 
+static Platform GetPlatform() {
+	int cpuinfo[4];
+	__cpuidex(cpuinfo, 0, 0);
+
+	int temp = cpuinfo[2];
+	cpuinfo[2] = cpuinfo[3];
+	cpuinfo[3] = temp;
+
+	char vendorName[13];
+	RtlZeroMemory(vendorName, 13);
+	memcpy(vendorName, &cpuinfo[1], 12);
+
+	__cpuidex(cpuinfo, 1, 0);
+
+	UINT16 family = (cpuinfo[0] >> 8) & 0xF;
+	UINT8 model = (cpuinfo[0] >> 4) & 0xF;
+	UINT8 stepping = cpuinfo[0] & 0xF;
+	if (family == 0xF || family == 0x6) {
+		model += (((cpuinfo[0] >> 16) & 0xF) << 4);
+	}
+	if (family == 0xF) {
+		family += (cpuinfo[0] >> 20) & 0xFF;
+	}
+
+	if (strcmp(vendorName, "AuthenticAMD") == 0) {
+		return PlatformRyzen; //family 23 for Picasso / Dali
+	} else if (strcmp(vendorName, "GenuineIntel") == 0) {
+		if (model == 122 || model == 92) //92 = Apollo Lake but keep for compatibility
+			return PlatformGeminiLake;
+		else
+			return PlatformTigerLake; //should be 140
+	}
+	return PlatformNone;
+}
+
 NTSTATUS BOOTCODEC(
 	_In_  PRTEK_CONTEXT  devContext
 )
@@ -258,7 +293,7 @@ NTSTATUS BOOTCODEC(
 		return status;
 	}
 
-	struct reg finishInit[] = {
+	struct reg finishInit1[] = {
 		//{RT5682_DEPOP_1, 0x0000},
 		//{RT5682_DMIC_CTRL_1, 0xa00},
 		//{RT5682_GPIO_CTRL_1, 0x2160},
@@ -266,30 +301,55 @@ NTSTATUS BOOTCODEC(
 		{RT5682_BIAS_CUR_CTRL_8, 0x4a6},
 		//{RT5682_CHARGE_PUMP_1, 0x220},
 		{RT5682_HP_CHARGE_PUMP_1, 0xe26},
-		{RT5682_DMIC_CTRL_1, 0x1a00},
+		{RT5682_DMIC_CTRL_1, 0x1a00}
+	};
 
+	struct reg setClocksRyzen[] = {
 		//set DAI format
 		//{RT5682_TDM_TCON_CTRL, 0x1a00},
 
-		//Set component PLL
+		//Set component PLL Ryzen
 		{RT5682_PLL2_CTRL_1, 0x1730},
 		{RT5682_PLL2_CTRL_2, 0x1e},
 		{RT5682_PLL2_CTRL_3, 0x200},
 		{RT5682_PLL2_CTRL_4, 0x180f},
 
-		//set component sysclk
+		//set component sysclk Ryzen
 		{RT5682_GLB_CLK, 0x4000},
 
-		//set bclk1 ratio
+		//set bclk1 ratio Ryzen
 		{RT5682_TDM_TCON_CTRL, 0x201},
-		
+
 		//set wclk prepare
-		//{RT5682_PWR_ANLG_1, 0x722f},
-		//{RT5682_PWR_DIG_1, 0x8000},
-		{RT5682_PWR_ANLG_3, 0x34}, //0x30 for internal mic
+		{RT5682_PWR_ANLG_3, 0x34}, //0x30 for internal mic [Ryzen],
 
 		//set clk
-		{RT5682_ADDA_CLK_1, 0x1121},
+		{RT5682_ADDA_CLK_1, 0x1121} //[Ryzen]
+	};
+
+	struct reg setClocksGeminiLake[] = {
+		//Set component PLL GLK
+		{RT5682_PLL_CTRL_1, 0x0f03},
+		{RT5682_PLL_CTRL_2, 0x3003},
+
+		//set component sysclk GLK
+		{RT5682_GLB_CLK, 0x2000},
+
+		//set bclk1 ratio GLK
+		{RT5682_TDM_TCON_CTRL, 0x0020},
+
+		//set wclk prepare
+		{RT5682_PWR_ANLG_3, 0x44}, //0x40 for internal mic [Gemini Lake]
+
+		{RT5682_ADDA_CLK_1, 0x1001}, //[Gemini Lake]
+	};
+		
+	struct reg finishInit2[] = {
+		//set wclk prepare
+		//{RT5682_PWR_ANLG_1, 0x722f},
+		//{RT5682_PWR_DIG_1, 0x8000},	
+
+		//set clk
 		{RT5682_PLL_TRACK_2, 0x0100},
 
 		//set bias level
@@ -297,17 +357,14 @@ NTSTATUS BOOTCODEC(
 
 		//Update more defaults
 		//{RT5682_HP_CTRL_2, 0x0000},
-		{RT5682_CBJ_BST_CTRL, 0x0200},
 		{RT5682_DAC1_DIG_VOL, 0x9f9f},
 		{RT5682_STO1_ADC_DIG_VOL, 0x2f2f}, //0xaf2f for internal mic
 		{RT5682_REC_MIXER, 0x0000},
 		//{RT5682_PWR_ANLG_1, 0xc000},
-		{RT5682_I2S1_SDP, 0x0000},
 		{RT5682_I2S2_SDP, 0xc000},
 		{RT5682_TDM_ADDA_CTRL_1, 0x8000},
 		{RT5682_PLL_TRACK_3, 0x0100},
 		{RT5682_GPIO_CTRL_1, 0x1160},
-		{RT5682_HP_LOGIC_CTRL_2, 0x17},
 
 		//Headphone defaults
 		{RT5682_HP_CTRL_2, 0x6000},
@@ -321,7 +378,59 @@ NTSTATUS BOOTCODEC(
 		{RT5682_CHOP_DAC, 0x3000},
 		{RT5682_CHOP_ADC, 0x3000} //not present for internal mic
 	};
-	status = rt5682_reg_burstWrite(devContext, finishInit, sizeof(finishInit) / sizeof(struct reg));
+
+	struct reg setDefaultsRyzen[] = {
+		//For Ryzen
+		{RT5682_CBJ_BST_CTRL, 0x0200},
+		{RT5682_I2S1_SDP, 0x0000},
+		{RT5682_HP_LOGIC_CTRL_2, 0x17}
+	};
+
+	struct reg setDefaultsGeminiLake[] = {
+		//For Gemini Lake
+		{RT5682_HP_CTRL_1, 0x0000},
+		{RT5682_CBJ_BST_CTRL, 0x0300},
+		{RT5682_DAC1_DIG_VOL, 0xa3a3},
+		{RT5682_STO1_DAC_MIXER, 0x2080}, //was 0xa0a0
+		{RT5682_PWR_ANLG_2, 0xe}, //was 0a0a
+		{RT5682_I2S1_SDP, 0x2200},
+		{RT5682_TDM_ADDA_CTRL_2, 0x0080},
+		{RT5682_HP_LOGIC_CTRL_2, 0x12}
+	};
+
+	Platform currentPlatform = GetPlatform();
+
+	status = rt5682_reg_burstWrite(devContext, finishInit1, sizeof(finishInit1) / sizeof(struct reg));
+	if (!NT_SUCCESS(status)) {
+		return status;
+	}
+
+	switch (currentPlatform) {
+	case PlatformRyzen:
+		status = rt5682_reg_burstWrite(devContext, setClocksRyzen, sizeof(setClocksRyzen) / sizeof(struct reg));
+		break;
+	case PlatformGeminiLake:
+		status = rt5682_reg_burstWrite(devContext, setClocksGeminiLake, sizeof(setClocksGeminiLake) / sizeof(struct reg));
+		break;
+	}
+	
+	if (!NT_SUCCESS(status)) {
+		return status;
+	}
+
+	status = rt5682_reg_burstWrite(devContext, finishInit2, sizeof(finishInit2) / sizeof(struct reg));
+	if (!NT_SUCCESS(status)) {
+		return status;
+	}
+
+	switch (currentPlatform) {
+	case PlatformRyzen:
+		status = rt5682_reg_burstWrite(devContext, setDefaultsRyzen, sizeof(setDefaultsRyzen) / sizeof(struct reg));
+		break;
+	case PlatformGeminiLake:
+		status = rt5682_reg_burstWrite(devContext, setDefaultsGeminiLake, sizeof(setDefaultsGeminiLake) / sizeof(struct reg));
+		break;
+	}
 	if (!NT_SUCCESS(status)) {
 		return status;
 	}

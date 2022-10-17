@@ -23,6 +23,13 @@
 #define true 1
 #define false 0
 
+typedef enum platform {
+	PlatformNone,
+	PlatformRyzen,
+	PlatformGeminiLake,
+	PlatformTigerLake
+} Platform;
+
 enum snd_jack_types {
 	SND_JACK_HEADPHONE = 0x0001,
 	SND_JACK_MICROPHONE = 0x0002,
