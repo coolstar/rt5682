@@ -5,8 +5,6 @@ Supports:
 * Jack Detection
 * Headphone output
 * Sleep/Wake
-
-Currently Not implemented:
 * Microphone input
 
 Note:
