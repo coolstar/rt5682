@@ -343,6 +343,13 @@ NTSTATUS BOOTCODEC(
 
 		{RT5682_ADDA_CLK_1, 0x1001}, //[Gemini Lake]
 	};
+
+	struct reg setClocksTigerLake[] = {
+		//set bclk1 ratio TGL
+		{RT5682_TDM_TCON_CTRL, 0x0030},
+
+		{RT5682_ADDA_CLK_1, 0x1001}, //[Gemini Lake]
+	};
 		
 	struct reg finishInit2[] = {
 		//set wclk prepare
@@ -398,6 +405,17 @@ NTSTATUS BOOTCODEC(
 		{RT5682_HP_LOGIC_CTRL_2, 0x12}
 	};
 
+	struct reg setDefaultsTigerLake[] = {
+		//For Tiger Lake
+		{RT5682_HP_CTRL_1, 0x8080},
+		{RT5682_CBJ_BST_CTRL, 0x0300},
+		{RT5682_DAC1_DIG_VOL, 0xafaf},
+		{RT5682_STO1_DAC_MIXER, 0x2080}, //was 0xa0a0
+		{RT5682_I2S1_SDP, 0x3330},
+		{RT5682_TDM_ADDA_CTRL_2, 0x0080},
+		{RT5682_HP_LOGIC_CTRL_2, 0x17}
+	};
+
 	Platform currentPlatform = GetPlatform();
 
 	status = rt5682_reg_burstWrite(devContext, finishInit1, sizeof(finishInit1) / sizeof(struct reg));
@@ -411,6 +429,9 @@ NTSTATUS BOOTCODEC(
 		break;
 	case PlatformGeminiLake:
 		status = rt5682_reg_burstWrite(devContext, setClocksGeminiLake, sizeof(setClocksGeminiLake) / sizeof(struct reg));
+		break;
+	case PlatformTigerLake:
+		status = rt5682_reg_burstWrite(devContext, setClocksTigerLake, sizeof(setClocksTigerLake) / sizeof(struct reg));
 		break;
 	}
 	
@@ -429,6 +450,9 @@ NTSTATUS BOOTCODEC(
 		break;
 	case PlatformGeminiLake:
 		status = rt5682_reg_burstWrite(devContext, setDefaultsGeminiLake, sizeof(setDefaultsGeminiLake) / sizeof(struct reg));
+		break;
+	case PlatformTigerLake:
+		status = rt5682_reg_burstWrite(devContext, setDefaultsTigerLake, sizeof(setDefaultsTigerLake) / sizeof(struct reg));
 		break;
 	}
 	if (!NT_SUCCESS(status)) {
