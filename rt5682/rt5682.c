@@ -178,6 +178,8 @@ static Platform GetPlatform() {
 	} else if (strcmp(vendorName, "GenuineIntel") == 0) {
 		if (model == 122 || model == 92) //92 = Apollo Lake but keep for compatibility
 			return PlatformGeminiLake;
+		else if (model == 142)
+			return PlatformCometLake;
 		else
 			return PlatformTigerLake; //should be 140
 	}
@@ -344,6 +346,23 @@ NTSTATUS BOOTCODEC(
 		{RT5682_ADDA_CLK_1, 0x1001}, //[Gemini Lake]
 	};
 
+	struct reg setClocksCometLake[] = {
+		//Set component PLL CML
+		{RT5682_PLL_CTRL_1, 0x1481},
+		{RT5682_PLL_CTRL_2, 0xc003},
+
+		//set component sysclk GLK
+		{RT5682_GLB_CLK, 0x2000},
+
+		//set bclk1 ratio CML
+		{RT5682_TDM_TCON_CTRL, 0x0020},
+
+		//set wclk prepare
+		{RT5682_PWR_ANLG_3, 0x40},
+
+		{RT5682_ADDA_CLK_1, 0x1001}, //[Gemini Lake]
+	};
+
 	struct reg setClocksTigerLake[] = {
 		//set bclk1 ratio TGL
 		{RT5682_TDM_TCON_CTRL, 0x0030},
@@ -405,6 +424,22 @@ NTSTATUS BOOTCODEC(
 		{RT5682_HP_LOGIC_CTRL_2, 0x12}
 	};
 
+	struct reg setDefaultsCometLake[] = {
+		//For Comet Lake
+		{RT5682_HP_CTRL_1, 0x8080},
+		{RT5682_CBJ_BST_CTRL, 0x0300},
+		{RT5682_DAC1_DIG_VOL, 0xafaf},
+		{RT5682_STO1_DAC_MIXER, 0x2080},
+		{RT5682_I2S1_SDP, 0x2220},
+		{RT5682_TDM_ADDA_CTRL_2, 0x0080},
+		{RT5682_HP_LOGIC_CTRL_2, 0x17},
+
+		//PLL tracks are different here 
+		{RT5682_PLL_TRACK_1, 0x3104},
+		{RT5682_PLL_TRACK_2, 0x1100},
+		{RT5682_PLL_TRACK_3, 0x1100}
+	};
+
 	struct reg setDefaultsTigerLake[] = {
 		//For Tiger Lake
 		{RT5682_HP_CTRL_1, 0x8080},
@@ -430,6 +465,9 @@ NTSTATUS BOOTCODEC(
 	case PlatformGeminiLake:
 		status = rt5682_reg_burstWrite(devContext, setClocksGeminiLake, sizeof(setClocksGeminiLake) / sizeof(struct reg));
 		break;
+	case PlatformCometLake:
+		status = rt5682_reg_burstWrite(devContext, setClocksCometLake, sizeof(setClocksCometLake) / sizeof(struct reg));
+		break;
 	case PlatformTigerLake:
 		status = rt5682_reg_burstWrite(devContext, setClocksTigerLake, sizeof(setClocksTigerLake) / sizeof(struct reg));
 		break;
@@ -450,6 +488,9 @@ NTSTATUS BOOTCODEC(
 		break;
 	case PlatformGeminiLake:
 		status = rt5682_reg_burstWrite(devContext, setDefaultsGeminiLake, sizeof(setDefaultsGeminiLake) / sizeof(struct reg));
+		break;
+	case PlatformCometLake:
+		status = rt5682_reg_burstWrite(devContext, setDefaultsCometLake, sizeof(setDefaultsCometLake) / sizeof(struct reg));
 		break;
 	case PlatformTigerLake:
 		status = rt5682_reg_burstWrite(devContext, setDefaultsTigerLake, sizeof(setDefaultsTigerLake) / sizeof(struct reg));

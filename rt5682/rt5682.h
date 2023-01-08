@@ -27,6 +27,7 @@ typedef enum platform {
 	PlatformNone,
 	PlatformRyzen,
 	PlatformGeminiLake,
+	PlatformCometLake,
 	PlatformTigerLake
 } Platform;
 
