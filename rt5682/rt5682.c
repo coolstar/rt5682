@@ -178,6 +178,8 @@ static Platform GetPlatform() {
 	} else if (strcmp(vendorName, "GenuineIntel") == 0) {
 		if (model == 122 || model == 92) //92 = Apollo Lake but keep for compatibility
 			return PlatformGeminiLake;
+		else if (model == 156) //Jasper Lake, but use same settings as CML
+			return PlatformCometLake;
 		else if (model == 142)
 			return PlatformCometLake;
 		else
