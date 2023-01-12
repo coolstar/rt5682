@@ -146,6 +146,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="registers.h" />
+    <ClInclude Include="rl6231.h" />
     <ClInclude Include="spb.h" />
     <ClInclude Include="stdint.h" />
     <ClInclude Include="trace.h" />
@@ -153,6 +154,7 @@
     <ClInclude Include="hidcommon.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="rl6231.c" />
     <ClCompile Include="spb.c" />
     <ClCompile Include="rt5682.c" />
   </ItemGroup>

@@ -8,6 +8,14 @@
 static ULONG Rt5682DebugLevel = 100;
 static ULONG Rt5682DebugCatagories = DBG_INIT || DBG_PNP || DBG_IOCTL;
 
+NTSTATUS rt5682_set_component_pll(PRTEK_CONTEXT  pDevice,
+	int pll_id, int source, unsigned int freq_in,
+	unsigned int freq_out);
+NTSTATUS rt5682_set_tdm_slot(PRTEK_CONTEXT  pDevice, unsigned int tx_mask,
+	unsigned int rx_mask, int slots, int slot_width);
+NTSTATUS rt5682_set_component_sysclk(PRTEK_CONTEXT  pDevice,
+	int clk_id);
+
 NTSTATUS
 DriverEntry(
 	__in PDRIVER_OBJECT  DriverObject,
@@ -367,7 +375,7 @@ NTSTATUS BOOTCODEC(
 
 	struct reg setClocksTigerLake[] = {
 		//set bclk1 ratio TGL
-		{RT5682_TDM_TCON_CTRL, 0x0030},
+		//{RT5682_TDM_TCON_CTRL, 0x0030}, //Reclocker should set this
 
 		{RT5682_ADDA_CLK_1, 0x1001}, //[Gemini Lake]
 	};
@@ -448,7 +456,8 @@ NTSTATUS BOOTCODEC(
 		{RT5682_CBJ_BST_CTRL, 0x0300},
 		{RT5682_DAC1_DIG_VOL, 0xafaf},
 		{RT5682_STO1_DAC_MIXER, 0x2080}, //was 0xa0a0
-		{RT5682_I2S1_SDP, 0x3330},
+		{RT5682_I2S1_SDP, 0x0000},
+		//{RT5682_I2S1_SDP, 0x3330}, //Reclocker should set this
 		{RT5682_TDM_ADDA_CTRL_2, 0x0080},
 		{RT5682_HP_LOGIC_CTRL_2, 0x17}
 	};
@@ -523,6 +532,300 @@ NTSTATUS BOOTCODEC(
 	}
 	return STATUS_SUCCESS;
 }
+
+int CsAudioArg2 = 1;
+
+VOID
+CSAudioRegisterEndpoint(
+	PRTEK_CONTEXT pDevice
+) {
+	CsAudioArg arg;
+	RtlZeroMemory(&arg, sizeof(CsAudioArg));
+	arg.argSz = sizeof(CsAudioArg);
+	arg.endpointType = CSAudioEndpointTypeHeadphone;
+	arg.endpointRequest = CSAudioEndpointRegister;
+	ExNotifyCallback(pDevice->CSAudioAPICallback, &arg, &CsAudioArg2);
+
+	arg.endpointType = CSAudioEndpointTypeMicJack;
+	ExNotifyCallback(pDevice->CSAudioAPICallback, &arg, &CsAudioArg2); //register both in case user decides to record first
+}
+
+VOID
+CsAudioCallbackFunction(
+	IN PRTEK_CONTEXT pDevice,
+	CsAudioArg* arg,
+	PVOID Argument2
+) {
+	if (!pDevice) {
+		return;
+	}
+
+	if (Argument2 == &CsAudioArg2) {
+		return;
+	}
+
+	pDevice->CSAudioManaged = TRUE;
+
+	CsAudioArg localArg;
+	RtlZeroMemory(&localArg, sizeof(CsAudioArg));
+	RtlCopyMemory(&localArg, arg, min(arg->argSz, sizeof(CsAudioArg)));
+
+	if (localArg.endpointType == CSAudioEndpointTypeDSP && localArg.endpointRequest == CSAudioEndpointRegister) {
+		CSAudioRegisterEndpoint(pDevice);
+	}
+	else if (localArg.endpointType != CSAudioEndpointTypeHeadphone &&
+		localArg.endpointType != CSAudioEndpointTypeMicJack) { //check both in case user decides to record first
+		return;
+	}
+
+	if (localArg.endpointRequest == CSAudioEndpointI2SParameters &&
+		localArg.i2sParameters.version >= 1) { //Supports version 1 or higher
+
+		Platform currentPlatform = GetPlatform();
+		if (currentPlatform == PlatformTigerLake) { //Reclock requested
+			UINT32 mclk = localArg.i2sParameters.mclk;
+			UINT32 freq = localArg.i2sParameters.frequency;
+			UINT32 slotWidth = localArg.i2sParameters.valid_bits;
+
+			UINT32 outclk = freq * 512;
+			if (mclk != outclk)
+				rt5682_set_component_pll(pDevice, RT5682_PLL1, RT5682_PLL1_S_MCLK, mclk, outclk);
+			rt5682_set_tdm_slot(pDevice, 1, 1, 2, slotWidth);
+			rt5682_set_component_sysclk(pDevice, mclk == outclk ? RT5682_SCLK_S_MCLK : RT5682_SCLK_S_PLL1);
+			rt5682_reg_update(pDevice, RT5682_PWR_ANLG_3, RT5682_PWR_PLL, mclk != outclk ? RT5682_PWR_PLL : 0);
+		}
+	}
+}
+
+#include "rl6231.h"
+NTSTATUS rt5682_set_component_pll(PRTEK_CONTEXT  pDevice,
+	int pll_id, int source, unsigned int freq_in,
+	unsigned int freq_out)
+{
+	struct rl6231_pll_code pll_code, pll2f_code, pll2b_code;
+	unsigned int pll2_fout1, pll2_ps_val;
+	int ret;
+
+	if (!freq_in || !freq_out) {
+		RtekPrint(DEBUG_LEVEL_ERROR, DBG_PNP,
+			"PLL disabled\n");
+		rt5682_reg_update(pDevice, RT5682_GLB_CLK,
+			RT5682_SCLK_SRC_MASK, RT5682_SCLK_SRC_MCLK);
+		return STATUS_SUCCESS;
+	}
+
+	if (pll_id == RT5682_PLL2) {
+		switch (source) {
+		case RT5682_PLL2_S_MCLK:
+			rt5682_reg_update(pDevice,
+				RT5682_GLB_CLK, RT5682_PLL2_SRC_MASK,
+				RT5682_PLL2_SRC_MCLK);
+			break;
+		default:
+			RtekPrint(DEBUG_LEVEL_ERROR, DBG_PNP,
+				"Unknown PLL2 Source %d\n",
+				source);
+			return STATUS_INVALID_PARAMETER;
+		}
+
+		/**
+		 * PLL2 concatenates 2 PLL units.
+		 * We suggest the Fout of the front PLL is 3.84MHz.
+		 */
+		pll2_fout1 = 3840000;
+		ret = rl6231_pll_calc(freq_in, pll2_fout1, &pll2f_code);
+		if (ret < 0) {
+			RtekPrint(DEBUG_LEVEL_ERROR, DBG_PNP,
+				"Unsupported input clock %d\n",
+				freq_in);
+			return ret;
+		}
+		RtekPrint(DEBUG_LEVEL_INFO, DBG_PNP,
+			"PLL2F: fin=%d fout=%d bypass=%d m=%d n=%d k=%d\n",
+			freq_in, pll2_fout1,
+			pll2f_code.m_bp,
+			(pll2f_code.m_bp ? 0 : pll2f_code.m_code),
+			pll2f_code.n_code, pll2f_code.k_code);
+
+		ret = rl6231_pll_calc(pll2_fout1, freq_out, &pll2b_code);
+		if (ret < 0) {
+			RtekPrint(DEBUG_LEVEL_ERROR, DBG_PNP,
+				"Unsupported input clock %d\n",
+				pll2_fout1);
+			return ret;
+		}
+		RtekPrint(DEBUG_LEVEL_INFO, DBG_PNP,
+			"PLL2B: fin=%d fout=%d bypass=%d m=%d n=%d k=%d\n",
+			pll2_fout1, freq_out,
+			pll2b_code.m_bp,
+			(pll2b_code.m_bp ? 0 : pll2b_code.m_code),
+			pll2b_code.n_code, pll2b_code.k_code);
+
+		rt5682_reg_write(pDevice, RT5682_PLL2_CTRL_1,
+			pll2f_code.k_code << RT5682_PLL2F_K_SFT |
+			pll2b_code.k_code << RT5682_PLL2B_K_SFT |
+			pll2b_code.m_code);
+		rt5682_reg_write(pDevice, RT5682_PLL2_CTRL_2,
+			pll2f_code.m_code << RT5682_PLL2F_M_SFT |
+			pll2b_code.n_code);
+		rt5682_reg_write(pDevice, RT5682_PLL2_CTRL_3,
+			pll2f_code.n_code << RT5682_PLL2F_N_SFT);
+
+		if (freq_out == 22579200)
+			pll2_ps_val = 1 << RT5682_PLL2B_SEL_PS_SFT;
+		else
+			pll2_ps_val = 1 << RT5682_PLL2B_PS_BYP_SFT;
+		rt5682_reg_update(pDevice, RT5682_PLL2_CTRL_4,
+			RT5682_PLL2B_SEL_PS_MASK | RT5682_PLL2B_PS_BYP_MASK |
+			RT5682_PLL2B_M_BP_MASK | RT5682_PLL2F_M_BP_MASK | 0xf,
+			pll2_ps_val |
+			(pll2b_code.m_bp ? 1 : 0) << RT5682_PLL2B_M_BP_SFT |
+			(pll2f_code.m_bp ? 1 : 0) << RT5682_PLL2F_M_BP_SFT |
+			0xf);
+	}
+	else {
+		switch (source) {
+		case RT5682_PLL1_S_MCLK:
+			rt5682_reg_update(pDevice,
+				RT5682_GLB_CLK, RT5682_PLL1_SRC_MASK,
+				RT5682_PLL1_SRC_MCLK);
+			break;
+		case RT5682_PLL1_S_BCLK1:
+			rt5682_reg_update(pDevice,
+				RT5682_GLB_CLK, RT5682_PLL1_SRC_MASK,
+				RT5682_PLL1_SRC_BCLK1);
+			break;
+		default:
+			RtekPrint(DEBUG_LEVEL_ERROR, DBG_PNP,
+				"Unknown PLL1 Source %d\n",
+				source);
+			return STATUS_INVALID_PARAMETER;
+		}
+
+		ret = rl6231_pll_calc(freq_in, freq_out, &pll_code);
+		if (ret < 0) {
+			RtekPrint(DEBUG_LEVEL_ERROR, DBG_PNP,
+				"Unsupported input clock %d\n",
+				freq_in);
+			return ret;
+		}
+
+		RtekPrint(DEBUG_LEVEL_INFO, DBG_PNP,
+			"bypass=%d m=%d n=%d k=%d\n",
+			pll_code.m_bp, (pll_code.m_bp ? 0 : pll_code.m_code),
+			pll_code.n_code, pll_code.k_code);
+
+		rt5682_reg_write(pDevice, RT5682_PLL_CTRL_1,
+			(pll_code.n_code << RT5682_PLL_N_SFT) | pll_code.k_code);
+		rt5682_reg_write(pDevice, RT5682_PLL_CTRL_2,
+			((pll_code.m_bp ? 0 : pll_code.m_code) << RT5682_PLL_M_SFT) |
+			((pll_code.m_bp << RT5682_PLL_M_BP_SFT) | RT5682_PLL_RST));
+	}
+
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS rt5682_set_tdm_slot(PRTEK_CONTEXT  pDevice, unsigned int tx_mask,
+	unsigned int rx_mask, int slots, int slot_width)
+{
+	unsigned int cl, val = 0;
+	
+	if (tx_mask || rx_mask)
+		rt5682_reg_update(pDevice, RT5682_TDM_ADDA_CTRL_2,
+			RT5682_TDM_EN, RT5682_TDM_EN);
+	else
+		rt5682_reg_update(pDevice, RT5682_TDM_ADDA_CTRL_2,
+			RT5682_TDM_EN, 0);
+
+	switch (slots) {
+	case 4:
+		val |= RT5682_TDM_TX_CH_4;
+		val |= RT5682_TDM_RX_CH_4;
+		break;
+	case 6:
+		val |= RT5682_TDM_TX_CH_6;
+		val |= RT5682_TDM_RX_CH_6;
+		break;
+	case 8:
+		val |= RT5682_TDM_TX_CH_8;
+		val |= RT5682_TDM_RX_CH_8;
+		break;
+	case 2:
+		break;
+	default:
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	rt5682_reg_update(pDevice, RT5682_TDM_ADDA_CTRL_2, RT5682_TDM_CTRL,
+		RT5682_TDM_TX_CH_MASK | RT5682_TDM_RX_CH_MASK, val);
+
+	switch (slot_width) {
+	case 8:
+		if (tx_mask || rx_mask)
+			return STATUS_INVALID_PARAMETER;
+		cl = RT5682_I2S1_TX_CHL_8 | RT5682_I2S1_RX_CHL_8;
+		break;
+	case 16:
+		val = RT5682_TDM_CL_16;
+		cl = RT5682_I2S1_TX_CHL_16 | RT5682_I2S1_RX_CHL_16;
+		break;
+	case 20:
+		val = RT5682_TDM_CL_20;
+		cl = RT5682_I2S1_TX_CHL_20 | RT5682_I2S1_RX_CHL_20 | RT5682_I2S1_DL_20;
+		break;
+	case 24:
+		val = RT5682_TDM_CL_24;
+		cl = RT5682_I2S1_TX_CHL_24 | RT5682_I2S1_RX_CHL_24 | RT5682_I2S1_DL_24;
+		break;
+	case 32:
+		val = RT5682_TDM_CL_32;
+		cl = RT5682_I2S1_TX_CHL_32 | RT5682_I2S1_RX_CHL_32 | RT5682_I2S1_DL_32;
+		break;
+	default:
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	rt5682_reg_update(pDevice, RT5682_TDM_TCON_CTRL,
+		RT5682_TDM_CL_MASK, val);
+	rt5682_reg_update(pDevice, RT5682_I2S1_SDP,
+		RT5682_I2S1_TX_CHL_MASK | RT5682_I2S1_RX_CHL_MASK | RT5682_I2S1_DL_MASK, cl);
+
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS rt5682_set_component_sysclk(PRTEK_CONTEXT  pDevice,
+	int clk_id)
+{
+	unsigned int reg_val = 0, src = 0;
+
+	switch (clk_id) {
+	case RT5682_SCLK_S_MCLK:
+		reg_val |= RT5682_SCLK_SRC_MCLK;
+		src = RT5682_CLK_SRC_MCLK;
+		break;
+	case RT5682_SCLK_S_PLL1:
+		reg_val |= RT5682_SCLK_SRC_PLL1;
+		src = RT5682_CLK_SRC_PLL1;
+		break;
+	case RT5682_SCLK_S_PLL2:
+		reg_val |= RT5682_SCLK_SRC_PLL2;
+		src = RT5682_CLK_SRC_PLL2;
+		break;
+	case RT5682_SCLK_S_RCCLK:
+		reg_val |= RT5682_SCLK_SRC_RCCLK;
+		src = RT5682_CLK_SRC_RCCLK;
+		break;
+	default:
+		RtekPrint(DEBUG_LEVEL_ERROR, DBG_PNP,
+			"Invalid clock id (%d)\n", clk_id);
+		return STATUS_INVALID_PARAMETER;
+	}
+	rt5682_reg_update(pDevice, RT5682_GLB_CLK,
+		RT5682_SCLK_SRC_MASK, reg_val);
+
+	return STATUS_SUCCESS;
+}
+
 
 NTSTATUS
 OnPrepareHardware(
@@ -648,6 +951,57 @@ Status
 	UNREFERENCED_PARAMETER(FxResourcesTranslated);
 
 	SpbTargetDeinitialize(FxDevice, &pDevice->I2CContext);
+
+	if (pDevice->CSAudioAPICallbackObj) {
+		ExUnregisterCallback(pDevice->CSAudioAPICallbackObj);
+		pDevice->CSAudioAPICallbackObj = NULL;
+	}
+
+	if (pDevice->CSAudioAPICallback) {
+		ObfDereferenceObject(pDevice->CSAudioAPICallback);
+		pDevice->CSAudioAPICallback = NULL;
+	}
+
+	return status;
+}
+
+NTSTATUS
+OnSelfManagedIoInit(
+	_In_
+	WDFDEVICE FxDevice
+) {
+	PRTEK_CONTEXT pDevice = GetDeviceContext(FxDevice);
+	NTSTATUS status = STATUS_SUCCESS;
+
+	// CS Audio Callback
+
+	UNICODE_STRING CSAudioCallbackAPI;
+	RtlInitUnicodeString(&CSAudioCallbackAPI, L"\\CallBack\\CsAudioCallbackAPI");
+
+
+	OBJECT_ATTRIBUTES attributes;
+	InitializeObjectAttributes(&attributes,
+		&CSAudioCallbackAPI,
+		OBJ_KERNEL_HANDLE | OBJ_OPENIF | OBJ_CASE_INSENSITIVE | OBJ_PERMANENT,
+		NULL,
+		NULL
+	);
+	status = ExCreateCallback(&pDevice->CSAudioAPICallback, &attributes, TRUE, TRUE);
+	if (!NT_SUCCESS(status)) {
+
+		return status;
+	}
+
+	pDevice->CSAudioAPICallbackObj = ExRegisterCallback(pDevice->CSAudioAPICallback,
+		CsAudioCallbackFunction,
+		pDevice
+	);
+	if (!pDevice->CSAudioAPICallbackObj) {
+
+		return STATUS_NO_CALLBACK_ACTIVE;
+	}
+
+	CSAudioRegisterEndpoint(pDevice);
 
 	return status;
 }
@@ -1010,6 +1364,7 @@ Rt5682EvtDeviceAdd(
 
 		pnpCallbacks.EvtDevicePrepareHardware = OnPrepareHardware;
 		pnpCallbacks.EvtDeviceReleaseHardware = OnReleaseHardware;
+		pnpCallbacks.EvtDeviceSelfManagedIoInit = OnSelfManagedIoInit;
 		pnpCallbacks.EvtDeviceD0Entry = OnD0Entry;
 		pnpCallbacks.EvtDeviceD0Exit = OnD0Exit;
 
