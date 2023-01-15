@@ -175,6 +175,10 @@ typedef struct _RTEK_CONTEXT
 
 	BOOLEAN CSAudioManaged;
 
+	BOOLEAN ReclockRequested;
+	UINT32 mclk;
+	UINT32 freq;
+	UINT32 slotWidth;
 } RTEK_CONTEXT, *PRTEK_CONTEXT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(RTEK_CONTEXT, GetDeviceContext)
