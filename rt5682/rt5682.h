@@ -134,6 +134,8 @@ HID_REPORT_DESCRIPTOR DefaultReportDescriptor[] = {
 	0x81, 0x02,                          //   INPUT (Data,Var,Abs)
 	0x09, 0x03,                          //   USAGE (Vendor Usage 2)
 	0x81, 0x02,                          //   INPUT (Data,Var,Abs)
+	0x09, 0x02,                          //   USAGE (Vendor Usage 1)
+	0x91, 0x02,                          //   OUTPUT (Data,Var,Abs)
 	0xc0,                                // END_COLLECTION
 };
 
