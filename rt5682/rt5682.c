@@ -775,7 +775,7 @@ NTSTATUS rt5682_set_tdm_slot(PRTEK_CONTEXT  pDevice, unsigned int tx_mask,
 		return STATUS_INVALID_PARAMETER;
 	}
 
-	rt5682_reg_update(pDevice, RT5682_TDM_ADDA_CTRL_2, RT5682_TDM_CTRL,
+	rt5682_reg_update(pDevice, RT5682_TDM_CTRL,
 		RT5682_TDM_TX_CH_MASK | RT5682_TDM_RX_CH_MASK, val);
 
 	switch (slot_width) {
@@ -1315,7 +1315,13 @@ RtekJdetWorkItem(
 	WDFDEVICE Device = (WDFDEVICE)WdfWorkItemGetParentObject(WorkItem);
 	PRTEK_CONTEXT pDevice = GetDeviceContext(Device);
 
+	WdfInterruptAcquireLock(pDevice->Interrupt);
+
 	rt5682_jackdetect(pDevice);
+
+	WdfInterruptReleaseLock(pDevice->Interrupt);
+
+	WdfObjectDelete(WorkItem);
 }
 
 BOOLEAN OnInterruptIsr(
